@@ -15,6 +15,8 @@ import FoundationModels
 import Api
 import UIKit
 import ProjectService
+import ImageIO
+import UniformTypeIdentifiers
 
 
 // MARK: - Pending action (derive-mode init payload)
@@ -369,15 +371,14 @@ final class FemiGenerateViewModel {
              }
              for await result in group {
                  if let row = result.value {
-                     let file = Self.resultFile(of: row)
+                     let file = Self.saveBase64(Self.resultFile(of: row), prompt: prompt, model: Self.resultModel(of: row), subject: ["line:\(lineIndex)"])
                      guard !queue.isEmpty else { continue }
                      let pid = queue.removeFirst()
                      withAnimation(.spring(duration: 0.35)) {
                          pendingGenerations.removeAll { $0.id == pid }
-                         if !images.contains(file) { images.append(file) }
+                         images.append(file)
                          imageLineIndex[file] = lineIndex
                      }
-                     saveToDisk(file, prompt: prompt, subject: ["line:\(lineIndex)"])
                  } else if result.status == 402, !topupFired {
                      topupFired = true
                      _ = await onTopupNeeded?()
@@ -480,14 +481,13 @@ final class FemiGenerateViewModel {
             }
             for await result in group {
                 if let row = result.value {
-                    let file = Self.resultFile(of: row)
+                    let file = Self.saveBase64(Self.resultFile(of: row), model: Self.resultModel(of: row))
                     guard !queue.isEmpty else { continue }
                     let pid = queue.removeFirst()
                     withAnimation(.spring(duration: 0.35)) {
                         pendingGenerations.removeAll { $0.id == pid }
-                        if !images.contains(file) { images.append(file) }
+                        images.append(file)
                     }
-                    saveToDisk(file)
                 } else if result.status == 402, !topupFired {
                     topupFired = true
                     _ = await onTopupNeeded?()
@@ -536,6 +536,17 @@ final class FemiGenerateViewModel {
          }
      }
 
+     /// Name of the model that produced the response — written to xmp:Model.
+     private static func resultModel(of api: API) -> String {
+         switch api.action {
+         case .typeFlux2Pro: return "Flux2Pro"
+         case .typeNanoBanana2: return "NanoBanana2"
+         case .typeZImageTurbo: return "ZImageTurbo"
+         case .typeLtx23A2V: return "Ltx23A2V"
+         default: return ""
+         }
+     }
+
     // Derive
 
     /// User tapped an image in the grid. Generate2 no longer owns the derive
@@ -578,16 +589,15 @@ final class FemiGenerateViewModel {
              }
              for await result in group {
                  if let row = result.value {
-                     let file = Self.resultFile(of: row)
+                     let subject = sourceLine.map { ["line:\($0)"] }
+                     let file = Self.saveBase64(Self.resultFile(of: row), prompt: text, model: Self.resultModel(of: row), subject: subject)
                      guard !queue.isEmpty else { continue }
                      let pid = queue.removeFirst()
                      withAnimation(.spring(duration: 0.35)) {
                          pendingGenerations.removeAll { $0.id == pid }
-                         if !images.contains(file) { images.append(file) }
+                         images.append(file)
                          if let sourceLine { imageLineIndex[file] = sourceLine }
                      }
-                     let subject = sourceLine.map { ["line:\($0)"] }
-                     saveToDisk(file, prompt: text, subject: subject)
                  } else if result.status == 402, !topupFired {
                      topupFired = true
                      _ = await onTopupNeeded?()
@@ -687,11 +697,12 @@ final class FemiGenerateViewModel {
                  ))
              })
              if let row = result.value {
+                 let file = Self.saveBase64(Self.resultFile(of: row), ext: "mp4", model: Self.resultModel(of: row))
                  withAnimation(.spring(duration: 0.4)) {
                      self.pendingVideos.removeAll { $0.id == pending.id }
                      self.videos.append(FemiGeneratedVideo(
                          id: UUID(),
-                         file: Self.resultFile(of: row),
+                         file: file,
                          posterFile: primary,
                          sourceImageIds: ids
                      ))
@@ -764,14 +775,24 @@ final class FemiGenerateViewModel {
 
      // refreshPricing removed
 
-    /// Fetch generated image bytes and persist them to the local project folder
-    /// (xmp metadata: prompt). Server is the source of truth; this is the
-    /// cold-start cache so the grid rehydrates without re-fetching.
-    fileprivate func saveToDisk(_ img: String, prompt: String? = nil, model: String? = nil, subject: [String]? = nil) {
-        Task {
-            let data = try! await MediaApi.fetch(img, idToken: (UIDevice.current.identifierForVendor?.uuidString ?? ""))
-            ProjectService.saveFile(data, named: img, prompt: prompt, model: model, subject: subject)
-        }
+    /// Decode the base64 returned by the API and persist to the project folder
+    /// under a fresh local filename. `ext` is sniffed from the bytes via ImageIO
+    /// when not supplied (video callers pass `"mp4"` since ImageIO doesn't
+    /// cover video). Returns the new filename for grid wiring.
+    fileprivate static func saveBase64(_ b64: String, ext: String? = nil, prompt: String? = nil, model: String? = nil, subject: [String]? = nil) -> String {
+        let data = Data(base64Encoded: b64)!
+        let finalExt = ext ?? detectImageExt(data)
+        let name = "gen-\(UUID().uuidString).\(finalExt)"
+        ProjectService.saveFile(data, named: name, prompt: prompt, model: model, subject: subject)
+        return name
+    }
+
+    private static func detectImageExt(_ data: Data) -> String {
+        guard let src = CGImageSourceCreateWithData(data as CFData, nil),
+              let uti = CGImageSourceGetType(src) as? String,
+              let ext = UTType(uti)?.preferredFilenameExtension
+        else { return "bin" }
+        return ext
     }
 
     /// Read a project file from disk and return its raw base64 — the API
@@ -866,19 +887,9 @@ struct FemiAuthorizedImage: View {
 //
     private func load() async {
         let localURL = ProjectService.getUrl(for: (filename as NSString).lastPathComponent)
-        if let data = try? Data(contentsOf: localURL),
-           let img = UIImage(data: data) {
+        if let data = try? Data(contentsOf: localURL), let img = UIImage(data: data) {
             await MainActor.run { self.image = img }
-            return
-        }
-        do {
-            let data = try await MediaApi.fetch(filename, idToken: (UIDevice.current.identifierForVendor?.uuidString ?? ""))
-            if let img = UIImage(data: data) {
-                await MainActor.run { self.image = img }
-            } else {
-                await MainActor.run { self.failed = true }
-            }
-        } catch {
+        } else {
             await MainActor.run { self.failed = true }
         }
     }
