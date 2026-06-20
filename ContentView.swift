@@ -706,7 +706,7 @@ final class FemiGenerateViewModel {
                  ))
              })
              if let row = result.value {
-                 let file = Self.saveBase64(Self.resultFile(of: row), ext: "mp4", model: Self.resultModel(of: row))
+                 let file = Self.saveBase64(Self.resultFile(of: row), ext: "mp4")
                  withAnimation(.spring(duration: 0.4)) {
                      self.pendingVideos.removeAll { $0.id == pending.id }
                      self.videos.append(FemiGeneratedVideo(
