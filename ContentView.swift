@@ -468,7 +468,7 @@ final class FemiGenerateViewModel {
             pendingGenerations.append(contentsOf: pendings)
             phase = .grid
         }
-        let prompt = ""
+        let prompt = "cinematic music video still, vivid color grade, dramatic lighting, expressive performer mid-motion, shallow depth of field, 35mm film grain, emotional and atmospheric"
         var topupFired = false
         await withTaskGroup(of: (value: API?, status: Int).self) { group in
             for api in Self.textToImageAPIs(prompt: prompt) {
