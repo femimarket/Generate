@@ -260,6 +260,9 @@ final class FemiGenerateViewModel {
     /// Sidecar dict for line-index. Filename → audiolines.index. Will move
     /// into xmp once ProjectService exposes a getLineIndex / setLineIndex.
     var imageLineIndex: [String: Int] = [:]
+    /// Sidecar dict for video line-index. Filename → audiolines.index. Populated
+    /// from xmp:Subject on disk rehydration and at video-creation time.
+    var videoLineIndex: [String: Int] = [:]
     var videos: [FemiGeneratedVideo] = []
     var pendingVideos: [FemiPendingVideo] = []
     var pendingImages: [FemiPendingImage] = []
@@ -410,12 +413,24 @@ final class FemiGenerateViewModel {
 
     /// Restore prior generations from the local project folder.
      func loadProjectGenerationsFromDisk() {
-         let existing = Set(images)
+         let existingImages = Set(images)
+         let existingVideos = Set(videos.map(\.file))
          for url in ProjectService.getAllGenerations() {
              let filename = url.lastPathComponent
-             guard !existing.contains(filename) else { continue }
-             guard Self.isGridImageFile(filename) else { continue }
-             images.append(filename)
+             let ext = url.pathExtension.lowercased()
+             if Self.isGridImageFile(filename) {
+                 if !existingImages.contains(filename) { images.append(filename) }
+             } else if ext == "mp4" {
+                 if !existingVideos.contains(filename) {
+                     videos.append(FemiGeneratedVideo(
+                         id: UUID(), file: filename, posterFile: "", sourceImageIds: []
+                     ))
+                     if let subject = ProjectService.getSubject(filename),
+                        let first = subject.first, let idx = Int(first) {
+                         videoLineIndex[filename] = idx
+                     }
+                 }
+             }
          }
          syncImageLikesFromDisk()
      }
@@ -541,7 +556,7 @@ final class FemiGenerateViewModel {
          case .typeNanoBanana2(let f): return f.file
          case .typeZImageTurbo(let f): return f.file
          case .typeLtx23A2V(let f): return f.file
-         default: return ""
+         default: preconditionFailure("resultFile: response action has no file field — \(api.action)")
          }
      }
 
@@ -552,7 +567,7 @@ final class FemiGenerateViewModel {
          case .typeNanoBanana2: return "NanoBanana2"
          case .typeZImageTurbo: return "ZImageTurbo"
          case .typeLtx23A2V: return "Ltx23A2V"
-         default: return ""
+         default: preconditionFailure("resultModel: unexpected response action — \(api.action)")
          }
      }
 
@@ -682,13 +697,13 @@ final class FemiGenerateViewModel {
          }
 //
          let audioFile = ProjectService.getAudio()!.lastPathComponent
-         let prompt = ProjectService.getPrompt(primary) ?? ""
+         let imagePrompts = ids.compactMap { ProjectService.getPrompt($0) }
          let imageB64 = Self.base64(of: primary)
          let lineRange: (start: Int, duration: Int)? = {
              guard let lineIndex = imageLineIndex[primary],
                    let line = audiolines?.first(where: { $0.index == lineIndex })
              else { return nil }
-             return (line.startMs, line.durationMs)
+             return (line.startMs, 10_000)
          }()
          Task { [weak self] in
              guard let self else { return }
@@ -700,13 +715,23 @@ final class FemiGenerateViewModel {
              } else {
                  audioB64 = Self.base64(of: audioFile)
              }
+             let prompt = await self.summarizePromptForVideo(imagePrompts: imagePrompts)
              let result = await self.apiCall("video", {
                  try await ApiHandlerAPI.apiHandler(API: Self.videoAPI(
                      prompt: prompt, image: imageB64, audio: audioB64
                  ))
              })
              if let row = result.value {
-                 let file = Self.saveBase64(Self.resultFile(of: row), ext: "mp4")
+                 let lineSubject: [String]? = {
+                     guard let idx = imageLineIndex[primary],
+                           let text = audiolines?.first(where: { $0.index == idx })?.text
+                     else { return nil }
+                     return ["\(idx)", text]
+                 }()
+                 let file = Self.saveBase64(
+                     Self.resultFile(of: row), ext: "mp4",
+                     prompt: prompt, model: Self.resultModel(of: row), subject: lineSubject
+                 )
                  withAnimation(.spring(duration: 0.4)) {
                      self.pendingVideos.removeAll { $0.id == pending.id }
                      self.videos.append(FemiGeneratedVideo(
@@ -715,6 +740,9 @@ final class FemiGenerateViewModel {
                          posterFile: primary,
                          sourceImageIds: ids
                      ))
+                     if let idx = self.imageLineIndex[primary] {
+                         self.videoLineIndex[file] = idx
+                     }
                  }
              } else {
                  if let idx = self.pendingVideos.firstIndex(where: { $0.id == pending.id }) {
@@ -800,7 +828,7 @@ final class FemiGenerateViewModel {
         guard let src = CGImageSourceCreateWithData(data as CFData, nil),
               let uti = CGImageSourceGetType(src) as? String,
               let ext = UTType(uti)?.preferredFilenameExtension
-        else { return "bin" }
+        else { preconditionFailure("detectImageExt: response bytes aren't a recognized image format") }
         return ext
     }
 
@@ -831,137 +859,24 @@ final class FemiGenerateViewModel {
         return try Data(contentsOf: outURL).base64EncodedString()
     }
 
-}
-
-// MARK: - Authorized image (femi.market, header-injected)
-
-struct FemiAuthorizedImage: View {
-    let filename: String
-    var contentMode: ContentMode = .fill
-//
-    @State private var image: UIImage?
-    @State private var failed = false
-//
-    private var isPreview: Bool {
-        ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1"
+    /// Ask Claude to distill the per-image xmp prompts into a timestamped
+    /// music-video prompt the Ltx23A2V model can use directly.
+    func summarizePromptForVideo(imagePrompts: [String]) async -> String {
+        let joined = imagePrompts.joined(separator: "\n---\n")
+        let instruction = "Convert these image prompts into a timestamped music-video prompt. Under 50 words.\n\n\(joined)"
+        let claudeAPI = Self.wrap(.typeClaudeSonnet46(ClaudeSonnet46(
+            messages: [ApiChatMessage(content: instruction, role: .user)],
+            type: .claudesonnet46
+        )))
+        let result = await apiCall("claude-prompt", {
+            try await ApiHandlerAPI.apiHandler(API: claudeAPI)
+        })
+        guard let row = result.value,
+              case .typeClaudeSonnet46(let c) = row.action,
+              let reply = c.messages.last?.content
+        else { preconditionFailure("summarizePromptForVideo: Claude response missing — \(String(describing: result))") }
+        return reply
     }
-//
-    var body: some View {
-        ZStack {
-            if isPreview {
-                // Deterministic colorful placeholder so Xcode previews look like
-                // real content without hitting the network.
-                previewSurface
-            } else if let image {
-                Image(uiImage: image).resizable().aspectRatio(contentMode: contentMode)
-            } else if failed {
-                Color.black.opacity(0.4).overlay(
-                    Image(systemName: "photo").foregroundStyle(FemiTheme.muted)
-                )
-            } else {
-                Shimmer()
-            }
-        }
-        .task(id: filename) {
-            guard !isPreview else { return }
-            await load()
-        }
-    }
-//
-    @ViewBuilder
-    private var previewSurface: some View {
-        if let img = bundledPreviewImage {
-            Image(uiImage: img).resizable().aspectRatio(contentMode: contentMode)
-        } else {
-            let hue = Double(abs(filename.hashValue % 360)) / 360.0
-            LinearGradient(
-                colors: [
-                    Color(hue: hue, saturation: 0.7, brightness: 0.6),
-                    Color(hue: hue + 0.1, saturation: 0.9, brightness: 0.4)
-                ],
-                startPoint: .topLeading, endPoint: .bottomTrailing
-            )
-        }
-    }
-//
-    private var bundledPreviewImage: UIImage? {
-        let ns = filename as NSString
-        let name = ns.deletingPathExtension
-        let ext = ns.pathExtension.isEmpty ? "png" : ns.pathExtension
-        guard let url = Bundle.main.url(forResource: name, withExtension: ext),
-              let data = try? Data(contentsOf: url)
-        else { return nil }
-        return UIImage(data: data)
-    }
-//
-    private func load() async {
-        let localURL = ProjectService.getUrl(for: (filename as NSString).lastPathComponent)
-        if let data = try? Data(contentsOf: localURL), let img = UIImage(data: data) {
-            await MainActor.run { self.image = img }
-        } else {
-            await MainActor.run { self.failed = true }
-        }
-    }
-}
-
-// MARK: - Shimmer placeholder
-
-private struct Shimmer: View {
-    @State private var phase: CGFloat = -1
-    var body: some View {
-        GeometryReader { geo in
-            ZStack {
-                FemiTheme.surface
-                LinearGradient(
-                    colors: [.clear, FemiTheme.accentMagenta.opacity(0.35),
-                             FemiTheme.accentBlue.opacity(0.35), .clear],
-                    startPoint: .leading, endPoint: .trailing
-                )
-                .frame(width: geo.size.width * 0.7)
-                .offset(x: phase * geo.size.width)
-                .blur(radius: 18)
-            }
-        }
-        .clipped()
-        .onAppear {
-            withAnimation(.easeInOut(duration: 1.6).repeatForever(autoreverses: false)) {
-                phase = 1.5
-            }
-        }
-    }
-}
-
-// MARK: - Authorized auto-muted looping video cell
-
-private struct AuthorizedVideoView: UIViewRepresentable {
-    let url: URL
-     func makeUIView(context: Context) -> PlayerUIView { PlayerUIView(url: url) }
-     func updateUIView(_ uiView: PlayerUIView, context: Context) {}
-}
-
-private final class PlayerUIView: UIView {
-    private let player: AVPlayer
-    private let layerView = AVPlayerLayer()
-    init(url: URL) {
-        let asset = AVURLAsset(url: url, options: [
-            "AVURLAssetHTTPHeaderFieldsKey": ["Authorization": "Bearer \((UIDevice.current.identifierForVendor?.uuidString ?? ""))"]
-        ])
-        let item = AVPlayerItem(asset: asset)
-        player = AVPlayer(playerItem: item)
-        super.init(frame: .zero)
-        backgroundColor = .black
-        player.isMuted = true
-        player.actionAtItemEnd = .none
-        layerView.player = player
-        layerView.videoGravity = .resizeAspectFill
-        layer.addSublayer(layerView)
-        player.play()
-        NotificationCenter.default.addObserver(
-            forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main
-        ) { [weak player] _ in player?.seek(to: .zero); player?.play() }
-    }
-    required init?(coder: NSCoder) { fatalError() }
-     override func layoutSubviews() { super.layoutSubviews(); layerView.frame = bounds }
 }
 
 // MARK: - Video detail playback (full screen, sound on)
@@ -1007,13 +922,10 @@ private struct VideoDetailView: View {
     }
 
      private func setupPlayback() {
-         let path = video.file.hasPrefix("/") ? String(video.file.dropFirst()) : video.file
-         guard !path.isEmpty, let url = URL(string: "https://femi.market/\(path)") else { return }
+         let url = ProjectService.getUrl(for: video.file)
          try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
          try? AVAudioSession.sharedInstance().setActive(true)
-         let asset = AVURLAsset(url: url, options: [
-             "AVURLAssetHTTPHeaderFieldsKey": ["Authorization": "Bearer \((UIDevice.current.identifierForVendor?.uuidString ?? ""))"]
-         ])
+         let asset = AVURLAsset(url: url)
          let item = AVPlayerItem(asset: asset)
          let p = AVPlayer(playerItem: item)
          p.isMuted = false
@@ -1277,28 +1189,7 @@ private struct GeneratingOverlay: View {
 // MARK: - Grid helpers (match DemoGenerate styling)
 
 @ViewBuilder
- private func femiSelectionBadge(order: Int?) -> some View {
-     ZStack {
-         if let order {
-             Text("\(order + 1)")
-                 .font(.caption.bold())
-                 .foregroundStyle(.white)
-                 .frame(width: 26, height: 26)
-                 .background(FemiTheme.accent, in: .circle)
-                 .overlay(Circle().stroke(.white, lineWidth: 1.5))
-         } else {
-             Circle()
-                 .stroke(.white.opacity(0.9), lineWidth: 1.5)
-                 .background(Circle().fill(.black.opacity(0.25)))
-                 .frame(width: 26, height: 26)
-         }
-     }
-     .shadow(color: .black.opacity(0.35), radius: 4, y: 1)
-     .padding(8)
- }
-
-@ViewBuilder
- private func femiHeartButton(isLiked: Bool, action: @escaping @MainActor () -> Void) -> some View {
+ func femiHeartButton(isLiked: Bool, action: @escaping @MainActor () -> Void) -> some View {
      Button {
          withAnimation(.spring(duration: 0.35)) { action() }
          UIImpactFeedbackGenerator(style: .medium).impactOccurred()
@@ -1328,61 +1219,6 @@ private struct GeneratingOverlay: View {
  }
 
 // MARK: - Grid
-
-/// Single image cell. Heart toggles via `likeStore`; disk mirror in `toggleLikeImage`.
-private struct FemiImageCell: View {
-    let image: String
-    @Bindable var viewModel: FemiGenerateViewModel
-
-    var body: some View {
-        let liked = viewModel.likeStore.isLiked(image)
-        let selecting = viewModel.isSelectingForVideo
-        let selected = viewModel.selectedImageIds.contains(image)
-        let eligible = !selecting || liked
-
-        Color.clear
-            .aspectRatio(1, contentMode: .fit)
-            .overlay { FemiAuthorizedImage(filename: image) }
-            .clipped()
-            .overlay {
-                if selecting && selected {
-                    FemiTheme.accentMagenta.opacity(0.18)
-                }
-            }
-            .overlay(alignment: .topTrailing) {
-                if selecting {
-                    if eligible {
-                        femiSelectionBadge(
-                            order: viewModel.selectedImageIds.firstIndex(of: image)
-                        )
-                    }
-                } else {
-                    femiHeartButton(isLiked: liked) {
-                        viewModel.toggleLikeImage(image)
-                    }
-                }
-            }
-            .opacity(eligible ? 1 : 0.3)
-            .contentShape(.rect)
-            .onTapGesture {
-                if selecting {
-                    guard eligible else { return }
-                    withAnimation(.spring(duration: 0.25)) {
-                        viewModel.toggleSelection(image)
-                    }
-                } else {
-                    viewModel.openDerive(image)
-                }
-            }
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel(
-                selecting
-                    ? (selected ? "Picture, selected" : "Picture, double tap to select")
-                    : "Picture, double tap to remake"
-            )
-            .accessibilityValue(liked ? "Saved" : "")
-    }
-}
 
 /// Commit shelf while picking pictures for a video (Photos pattern).
 private struct FemiMakeVideoShelf: View {
@@ -1470,12 +1306,12 @@ private struct GridView: View {
         ScrollView {
             LazyVGrid(columns: columns, spacing: 2) {
                 if viewModel.filter != .videos {
-                    ForEach(visibleFemiPendingImages) { pendingImageCell($0) }
-                    ForEach(visibleFemiPendingGenerations) { pendingGenerationCell($0) }
+                    ForEach(visibleFemiPendingImages) { PendingImageCell(pending: $0, viewModel: viewModel) }
+                    ForEach(visibleFemiPendingGenerations) { PendingGenerationCell(pending: $0, viewModel: viewModel) }
                     ForEach(viewModel.filteredImages, id: \.self) { FemiImageCell(image: $0, viewModel: viewModel) }
                 }
-                ForEach(visibleFemiPendingVideos) { pendingCell($0) }
-                ForEach(visibleVideos) { videoCell($0) }
+                ForEach(visibleFemiPendingVideos) { PendingVideoCell(pending: $0, viewModel: viewModel) }
+                ForEach(visibleVideos) { VideoCell(video: $0, viewModel: viewModel) }
             }
             .padding(.horizontal, 2)
             .padding(.top, 6)
@@ -1495,8 +1331,8 @@ private struct GridView: View {
              LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
                  if !visibleFemiPendingImages.isEmpty || !visibleFemiPendingVideos.isEmpty {
                      LazyVGrid(columns: columns, spacing: 2) {
-                         ForEach(visibleFemiPendingImages) { pendingImageCell($0) }
-                         ForEach(visibleFemiPendingVideos) { pendingCell($0) }
+                         ForEach(visibleFemiPendingImages) { PendingImageCell(pending: $0, viewModel: viewModel) }
+                         ForEach(visibleFemiPendingVideos) { PendingVideoCell(pending: $0, viewModel: viewModel) }
                      }
                      .padding(.horizontal, 2)
                      .padding(.top, 6)
@@ -1505,11 +1341,13 @@ private struct GridView: View {
                  ForEach(audiolines) { line in
                      let imagesForLine = viewModel.filteredImages.filter { viewModel.imageLineIndex[$0] == line.index }
                      let pendingsForLine = visibleFemiPendingGenerations.filter { $0.lineIndex == line.index }
+                     let videosForLine = visibleVideos.filter { viewModel.videoLineIndex[$0.file] == line.index }
                      Section {
-                         if !pendingsForLine.isEmpty || !imagesForLine.isEmpty {
+                         if !pendingsForLine.isEmpty || !imagesForLine.isEmpty || !videosForLine.isEmpty {
                              LazyVGrid(columns: columns, spacing: 2) {
-                                 ForEach(pendingsForLine) { pendingGenerationCell($0) }
+                                 ForEach(pendingsForLine) { PendingGenerationCell(pending: $0, viewModel: viewModel) }
                                  ForEach(imagesForLine, id: \.self) { FemiImageCell(image: $0, viewModel: viewModel) }
+                                 ForEach(videosForLine) { VideoCell(video: $0, viewModel: viewModel) }
                              }
                              .padding(.horizontal, 2)
                              .padding(.top, 4)
@@ -1517,14 +1355,14 @@ private struct GridView: View {
                      } header: {
                          sectionHeader(
                              line: line,
-                             imageCount: imagesForLine.count + pendingsForLine.count
+                             imageCount: imagesForLine.count + pendingsForLine.count + videosForLine.count
                          )
                      }
                  }
-//
-                 if !visibleVideos.isEmpty {
+                 let orphanVideos = visibleVideos.filter { viewModel.videoLineIndex[$0.file] == nil }
+                 if !orphanVideos.isEmpty {
                      LazyVGrid(columns: columns, spacing: 2) {
-                         ForEach(visibleVideos) { videoCell($0) }
+                         ForEach(orphanVideos) { VideoCell(video: $0, viewModel: viewModel) }
                      }
                      .padding(.horizontal, 2)
                      .padding(.top, 12)
@@ -1666,172 +1504,6 @@ private struct GridView: View {
          .padding(8)
      }
 
-    /// Shimmer cell while an uploaded photo is sent to the image service.
-    @ViewBuilder
-     private func pendingImageCell(_ pending: FemiPendingImage) -> some View {
-         Color.clear
-             .aspectRatio(1, contentMode: .fit)
-             .overlay {
-                 ZStack {
-                     FemiTheme.surface
-                     if pending.state == .working {
-                         Shimmer()
-                         VStack(spacing: 8) {
-                             ProgressView()
-                                 .progressViewStyle(.circular)
-                                 .tint(.white)
-                             Text("Uploading…")
-                                 .font(.caption.weight(.semibold))
-                                 .foregroundStyle(.white)
-                                 .shadow(color: .black.opacity(0.5), radius: 4)
-                         }
-                     } else {
-                         VStack(spacing: 8) {
-                             Image(systemName: "exclamationmark.triangle.fill")
-                                 .font(.title3)
-                                 .foregroundStyle(.white)
-                             Text("Upload failed — tap to dismiss")
-                                 .font(.caption.weight(.semibold))
-                                 .foregroundStyle(.white)
-                                 .multilineTextAlignment(.center)
-                                 .padding(.horizontal, 8)
-                         }
-                     }
-                 }
-             }
-             .clipped()
-             .contentShape(.rect)
-             .onTapGesture {
-                 if pending.state == .failed {
-                     viewModel.dismissFemiPendingImage(pending.id)
-                 }
-             }
-     }
-
-    /// Shimmer cell for in-flight image generation (derive or fill-line).
-    /// Same visual language as `pendingImageCell` — the user reads "something
-    /// is being made for this slot" without us having to label which kind.
-    @ViewBuilder
-     private func pendingGenerationCell(_ pending: FemiPendingGeneration) -> some View {
-         Color.clear
-             .aspectRatio(1, contentMode: .fit)
-             .overlay {
-                 ZStack {
-                     FemiTheme.surface
-                     if pending.state == .working {
-                         Shimmer()
-                         VStack(spacing: 8) {
-                             ProgressView()
-                                 .progressViewStyle(.circular)
-                                 .tint(.white)
-                             Text("Making…")
-                                 .font(.caption.weight(.semibold))
-                                 .foregroundStyle(.white)
-                                 .shadow(color: .black.opacity(0.5), radius: 4)
-                         }
-                     } else {
-                         VStack(spacing: 8) {
-                             Image(systemName: "exclamationmark.triangle.fill")
-                                 .font(.title3)
-                                 .foregroundStyle(.white)
-                             Text("Failed — tap to dismiss")
-                                 .font(.caption.weight(.semibold))
-                                 .foregroundStyle(.white)
-                                 .multilineTextAlignment(.center)
-                                 .padding(.horizontal, 8)
-                         }
-                     }
-                 }
-             }
-             .clipped()
-             .contentShape(.rect)
-             .onTapGesture {
-                 if pending.state == .failed {
-                     viewModel.dismissFemiPendingGeneration(pending.id)
-                 }
-             }
-     }
-
-    /// Shimmer cell with the source picture as a soft poster while video gen runs.
-    /// When generation fails, taps dismiss the cell.
-    @ViewBuilder
-     private func pendingCell(_ pending: FemiPendingVideo) -> some View {
-         Color.clear
-             .aspectRatio(1, contentMode: .fit)
-             .overlay {
-                 ZStack {
-                     FemiAuthorizedImage(filename: pending.posterFile)
-                         .opacity(pending.state == .failed ? 0.5 : 0.4)
-                     if pending.state == .working {
-                         VStack(spacing: 10) {
-                             ProgressView()
-                                 .progressViewStyle(.circular)
-                                 .tint(.white)
-                                 .controlSize(.regular)
-                             Text("Making…")
-                                 .font(.caption.weight(.semibold))
-                                 .foregroundStyle(.white)
-                                 .shadow(color: .black.opacity(0.5), radius: 4)
-                         }
-                     } else {
-                         VStack(spacing: 8) {
-                             Image(systemName: "exclamationmark.triangle.fill")
-                                 .font(.title3)
-                                 .foregroundStyle(.white)
-                             Text("Failed — tap to dismiss")
-                                 .font(.caption.weight(.semibold))
-                                 .foregroundStyle(.white)
-                                 .multilineTextAlignment(.center)
-                                 .padding(.horizontal, 8)
-                         }
-                     }
-                 }
-             }
-             .clipped()
-             .contentShape(.rect)
-             .onTapGesture {
-                 if pending.state == .failed {
-                     viewModel.dismissFemiPendingVideo(pending.id)
-                 }
-             }
-     }
-
-    @ViewBuilder
-     private func videoCell(_ video: FemiGeneratedVideo) -> some View {
-         // Videos aren't selectable for new videos (per spec: video-from-video deferred).
-         // In select mode, dim them.
-         let selecting = viewModel.isSelectingForVideo
-         Color.clear
-             .aspectRatio(1, contentMode: .fit)
-             .overlay {
-                 ZStack {
-                     let p = video.file.hasPrefix("/") ? String(video.file.dropFirst()) : video.file
-                     if !p.isEmpty, let url = URL(string: "https://femi.market/\(p)") {
-                         AuthorizedVideoView(url: url)
-                     } else {
-                         FemiAuthorizedImage(filename: video.posterFile)
-                     }
-                     Image(systemName: "play.circle.fill").font(.system(size: 28))
-                         .foregroundStyle(.white.opacity(0.85)).shadow(radius: 4)
-                 }
-             }
-             .clipped()
-             .overlay(alignment: .topTrailing) {
-                 if !selecting {
-                     femiHeartButton(isLiked: viewModel.likeStore.isLiked(video.id.uuidString)) {
-                         viewModel.toggleLikeVideo(video)
-                     }
-                 }
-             }
-             .opacity(selecting ? 0.3 : 1)
-             .contentShape(.rect)
-             .onTapGesture {
-                 guard !selecting else { return }
-                 viewModel.viewingVideo = video
-             }
-             .accessibilityLabel("Video, double tap to watch")
-             .accessibilityValue(viewModel.likeStore.isLiked(video.id.uuidString) ? "Saved" : "")
-     }
 }
 
 // MARK: - Completion
