@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import ProjectService
 
 // MARK: - Shimmer placeholder (used only by pending cells)
 
@@ -14,10 +15,10 @@ struct Shimmer: View {
     var body: some View {
         GeometryReader { geo in
             ZStack {
-                FemiTheme.surface
+                Theme.surface
                 LinearGradient(
-                    colors: [.clear, FemiTheme.accentMagenta.opacity(0.35),
-                             FemiTheme.accentBlue.opacity(0.35), .clear],
+                    colors: [.clear, Theme.accentMagenta.opacity(0.35),
+                             Theme.accentBlue.opacity(0.35), .clear],
                     startPoint: .leading, endPoint: .trailing
                 )
                 .frame(width: geo.size.width * 0.7)
@@ -37,15 +38,15 @@ struct Shimmer: View {
 // MARK: - Pending image upload cell
 
 struct PendingImageCell: View {
-    let pending: FemiPendingImage
-    @Bindable var viewModel: FemiGenerateViewModel
+    let pending: PendingImage
+    @Binding var pendingImages: [PendingImage]
 
     var body: some View {
         Color.clear
             .aspectRatio(1, contentMode: .fit)
             .overlay {
                 ZStack {
-                    FemiTheme.surface
+                    Theme.surface
                     if pending.state == .working {
                         Shimmer()
                         VStack(spacing: 8) {
@@ -75,7 +76,7 @@ struct PendingImageCell: View {
             .contentShape(.rect)
             .onTapGesture {
                 if pending.state == .failed {
-                    withAnimation { viewModel.pendingImages.removeAll { $0.id == pending.id } }
+                    withAnimation { pendingImages.removeAll { $0.id == pending.id } }
                 }
             }
     }
@@ -84,15 +85,15 @@ struct PendingImageCell: View {
 // MARK: - Pending image-generation cell (derive / fill-line)
 
 struct PendingGenerationCell: View {
-    let pending: FemiPendingGeneration
-    @Bindable var viewModel: FemiGenerateViewModel
+    let pending: PendingGeneration
+    @Binding var pendingGenerations: [PendingGeneration]
 
     var body: some View {
         Color.clear
             .aspectRatio(1, contentMode: .fit)
             .overlay {
                 ZStack {
-                    FemiTheme.surface
+                    Theme.surface
                     if pending.state == .working {
                         Shimmer()
                         VStack(spacing: 8) {
@@ -122,7 +123,7 @@ struct PendingGenerationCell: View {
             .contentShape(.rect)
             .onTapGesture {
                 if pending.state == .failed {
-                    withAnimation { viewModel.pendingGenerations.removeAll { $0.id == pending.id } }
+                    withAnimation { pendingGenerations.removeAll { $0.id == pending.id } }
                 }
             }
     }
@@ -131,16 +132,23 @@ struct PendingGenerationCell: View {
 // MARK: - Pending video cell (poster + shimmer)
 
 struct PendingVideoCell: View {
-    let pending: FemiPendingVideo
-    @Bindable var viewModel: FemiGenerateViewModel
+    let pending: PendingVideo
+    @Binding var pendingVideos: [PendingVideo]
 
     var body: some View {
         Color.clear
             .aspectRatio(1, contentMode: .fit)
             .overlay {
                 ZStack {
-                    FemiAuthorizedImage(filename: pending.posterFile)
-                        .opacity(pending.state == .failed ? 0.5 : 0.4)
+                    AsyncImage(url: ProjectService.getUrl(for: pending.posterFile)) { phase in
+                        switch phase {
+                        case .empty: Shimmer()
+                        case .success(let img): img.resizable().aspectRatio(contentMode: .fill)
+                        case .failure: Color.black.opacity(0.4)
+                        @unknown default: EmptyView()
+                        }
+                    }
+                    .opacity(pending.state == .failed ? 0.5 : 0.4)
                     if pending.state == .working {
                         VStack(spacing: 10) {
                             ProgressView()
@@ -170,7 +178,7 @@ struct PendingVideoCell: View {
             .contentShape(.rect)
             .onTapGesture {
                 if pending.state == .failed {
-                    withAnimation { viewModel.pendingVideos.removeAll { $0.id == pending.id } }
+                    withAnimation { pendingVideos.removeAll { $0.id == pending.id } }
                 }
             }
     }

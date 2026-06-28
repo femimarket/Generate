@@ -45,11 +45,13 @@ final class PlayerUIView: UIView {
 // MARK: - Grid video cell
 
 struct VideoCell: View {
-    let video: FemiGeneratedVideo
-    @Bindable var viewModel: FemiGenerateViewModel
+    let video: GeneratedVideo
+    let isSelectingForVideo: Bool
+    @Binding var viewingVideo: GeneratedVideo?
+    let likeStore: LikeStore
 
     var body: some View {
-        let selecting = viewModel.isSelectingForVideo
+        let selecting = isSelectingForVideo
         Color.clear
             .aspectRatio(1, contentMode: .fit)
             .overlay {
@@ -62,8 +64,8 @@ struct VideoCell: View {
             .clipped()
             .overlay(alignment: .topTrailing) {
                 if !selecting {
-                    femiHeartButton(isLiked: viewModel.likeStore.isLiked(video.id.uuidString)) {
-                        viewModel.likeStore.toggle(video.id.uuidString)
+                    heartButton(isLiked: likeStore.isLiked(video.id.uuidString)) {
+                        likeStore.toggle(video.id.uuidString)
                     }
                 }
             }
@@ -71,9 +73,9 @@ struct VideoCell: View {
             .contentShape(.rect)
             .onTapGesture {
                 guard !selecting else { return }
-                viewModel.viewingVideo = video
+                viewingVideo = video
             }
             .accessibilityLabel("Video, double tap to watch")
-            .accessibilityValue(viewModel.likeStore.isLiked(video.id.uuidString) ? "Saved" : "")
+            .accessibilityValue(likeStore.isLiked(video.id.uuidString) ? "Saved" : "")
     }
 }

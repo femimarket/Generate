@@ -18,26 +18,28 @@ struct Generate2App: App {
     }
 }
 
-/// Standalone host for Generate2. Bridges Generate2's `onTopupNeeded` async
-/// closure to a dummy sheet.
+/// Standalone host for Generate2. Credentials come from named Xcode scheme
+/// launch arguments: `-user <value> -password <value>`.
 private struct AppRoot: View {
-    @State private var bridge = TopupBridge()
     @State private var songBridge = SongBridge()
+
+    private func arg(_ flag: String) -> String {
+        let args = ProcessInfo.processInfo.arguments
+        guard let i = args.firstIndex(of: flag), i + 1 < args.count else {
+            preconditionFailure("Missing required launch argument: \(flag)")
+        }
+        return args[i + 1]
+    }
 
     var body: some View {
         NavigationStack {
             ContentView(
-                onTopupNeeded: { await bridge.request() },
+                user: arg("-user"),
+                password: arg("-password"),
                 onUploadSong: { await songBridge.request() },
                 menuItemName1: "Editorial",
                 menuItemIcon1: "rectangle.stack",
                 onMenuItemTapped1: {}
-            )
-        }
-        .sheet(isPresented: $bridge.showSheet, onDismiss: bridge.resolveAsFailureIfPending) {
-            DummyParentTopupSheet(
-                onSuccess: { bridge.resolve(true) },
-                onCancel: { bridge.resolve(false) }
             )
         }
         .sheet(isPresented: $songBridge.showSheet, onDismiss: songBridge.resolveAsCancelIfPending) {
@@ -92,8 +94,8 @@ private struct DummySongPickerSheet: View {
     }
 }
 
-/// Async-to-sheet bridge for the dummy song picker. Mirrors `TopupBridge`
-/// but resolves with `Void` — parent writes audio to disk itself.
+/// Async-to-sheet bridge for the dummy song picker. Resolves with `Void` —
+/// parent writes audio to disk itself.
 @MainActor @Observable
 private final class SongBridge {
     var showSheet = false
@@ -119,68 +121,5 @@ private final class SongBridge {
         guard let cont = continuation else { return }
         continuation = nil
         cont.resume()
-    }
-}
-
-/// Async-to-sheet bridge for the dummy topup. Same shape the real parent
-/// app's StoreKit flow will use.
-@MainActor @Observable
-private final class TopupBridge {
-    var showSheet = false
-    private var continuation: CheckedContinuation<Bool, Never>?
-
-    func request() async -> Bool {
-        await withCheckedContinuation { cont in
-            Task { @MainActor in
-                self.continuation = cont
-                self.showSheet = true
-            }
-        }
-    }
-
-    func resolve(_ success: Bool) {
-        guard let cont = continuation else { return }
-        continuation = nil
-        cont.resume(returning: success)
-        showSheet = false
-    }
-
-    func resolveAsFailureIfPending() {
-        guard let cont = continuation else { return }
-        continuation = nil
-        cont.resume(returning: false)
-    }
-}
-
-private struct DummyParentTopupSheet: View {
-    let onSuccess: () -> Void
-    let onCancel: () -> Void
-
-    var body: some View {
-        VStack(spacing: 20) {
-            Capsule().fill(.gray.opacity(0.3))
-                .frame(width: 40, height: 4)
-                .padding(.top, 8)
-            Image(systemName: "creditcard.fill")
-                .font(.system(size: 48, weight: .bold))
-                .foregroundStyle(.blue)
-            Text("Parent topup (dummy)")
-                .font(.title2.bold())
-            Text("Pretend the parent app is showing its own purchase flow here.")
-                .font(.footnote)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 32)
-            Spacer()
-            Button("Pretend purchase succeeded") {
-                onSuccess()
-            }
-            .buttonStyle(.borderedProminent)
-            Button("Cancel", role: .cancel) {
-                onCancel()
-            }
-            .padding(.bottom, 24)
-        }
-        .padding(.horizontal, 16)
-        .presentationDetents([.medium])
     }
 }

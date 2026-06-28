@@ -10,7 +10,7 @@ enum LyricExtractor {
     /// SYLT timestamps are per-WORD, not per-line. Build running lines by
     /// splitting each word's text on `\n` — every newline closes the current
     /// line. Words inside a line are joined with a single space.
-    nonisolated static func read(audioURL: URL) -> [FemiSongLine] {
+    nonisolated static func read(audioURL: URL) -> [SongLine] {
         let engine = AudioMarkerEngine()
         guard let info = try? engine.read(from: audioURL),
               let words = info.metadata.synchronizedLyrics.first?.lines,
@@ -44,11 +44,11 @@ enum LyricExtractor {
             lines.append((p.startMs, p.words.joined(separator: " ")))
         }
 
-        var out: [FemiSongLine] = []
+        var out: [SongLine] = []
         for i in lines.indices {
             let start = lines[i].start
             let end = i + 1 < lines.count ? lines[i + 1].start : start
-            out.append(FemiSongLine(
+            out.append(SongLine(
                 id: UUID(),
                 index: i,
                 text: lines[i].text,

@@ -6,110 +6,53 @@
 //
 
 import SwiftUI
-import UIKit
 import ProjectService
-
-// MARK: - Authorized image (reads from local project folder)
-
-struct FemiAuthorizedImage: View {
-    let filename: String
-    var contentMode: ContentMode = .fill
-
-    @State private var image: UIImage?
-    @State private var failed = false
-
-    private var isPreview: Bool {
-        ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1"
-    }
-
-    var body: some View {
-        ZStack {
-            if isPreview {
-                previewSurface
-            } else if let image {
-                Image(uiImage: image).resizable().aspectRatio(contentMode: contentMode)
-            } else if failed {
-                Color.black.opacity(0.4).overlay(
-                    Image(systemName: "photo").foregroundStyle(FemiTheme.muted)
-                )
-            } else {
-                Shimmer()
-            }
-        }
-        .task(id: filename) {
-            guard !isPreview else { return }
-            await load()
-        }
-    }
-
-    @ViewBuilder
-    private var previewSurface: some View {
-        if let img = bundledPreviewImage {
-            Image(uiImage: img).resizable().aspectRatio(contentMode: contentMode)
-        } else {
-            let hue = Double(abs(filename.hashValue % 360)) / 360.0
-            LinearGradient(
-                colors: [
-                    Color(hue: hue, saturation: 0.7, brightness: 0.6),
-                    Color(hue: hue + 0.1, saturation: 0.9, brightness: 0.4)
-                ],
-                startPoint: .topLeading, endPoint: .bottomTrailing
-            )
-        }
-    }
-
-    private var bundledPreviewImage: UIImage? {
-        let ns = filename as NSString
-        let name = ns.deletingPathExtension
-        let ext = ns.pathExtension.isEmpty ? "png" : ns.pathExtension
-        guard let url = Bundle.main.url(forResource: name, withExtension: ext),
-              let data = try? Data(contentsOf: url)
-        else { return nil }
-        return UIImage(data: data)
-    }
-
-    private func load() async {
-        let localURL = ProjectService.getUrl(for: (filename as NSString).lastPathComponent)
-        if let data = try? Data(contentsOf: localURL), let img = UIImage(data: data) {
-            await MainActor.run { self.image = img }
-        } else {
-            await MainActor.run { self.failed = true }
-        }
-    }
-}
 
 // MARK: - Grid image cell
 
-struct FemiImageCell: View {
+struct ImageCell: View {
     let image: String
-    @Bindable var viewModel: FemiGenerateViewModel
+    let isSelectingForVideo: Bool
+    @Binding var selectedImageIds: [String]
+    let likeStore: LikeStore
 
     var body: some View {
-        let liked = viewModel.likeStore.isLiked(image)
-        let selecting = viewModel.isSelectingForVideo
-        let selected = viewModel.selectedImageIds.contains(image)
+        let liked = likeStore.isLiked(image)
+        let selecting = isSelectingForVideo
+        let selected = selectedImageIds.contains(image)
         let eligible = !selecting || liked
 
         Color.clear
             .aspectRatio(1, contentMode: .fit)
-            .overlay { FemiAuthorizedImage(filename: image) }
+            .overlay {
+                AsyncImage(url: ProjectService.getUrl(for: image)) { phase in
+                    switch phase {
+                    case .empty: Shimmer()
+                    case .success(let img): img.resizable().aspectRatio(contentMode: .fill)
+                    case .failure: Color.black.opacity(0.4).overlay(
+                        Image(systemName: "photo").foregroundStyle(Theme.muted)
+                    )
+                    @unknown default: EmptyView()
+                    }
+                }
+            }
             .clipped()
             .overlay {
                 if selecting && selected {
-                    FemiTheme.accentMagenta.opacity(0.18)
+                    Theme.accentMagenta.opacity(0.18)
                 }
             }
             .overlay(alignment: .topTrailing) {
                 if selecting {
                     if eligible {
-                        femiSelectionBadge(
-                            order: viewModel.selectedImageIds.firstIndex(of: image)
+                        selectionBadge(
+                            order: selectedImageIds.firstIndex(of: image)
                         )
                     }
                 } else {
-                    femiHeartButton(isLiked: liked) {
-                        viewModel.likeStore.toggle(image)
-                        ProjectService.like(image, viewModel.likeStore.isLiked(image))
+                    heartButton(isLiked: liked) {
+                        likeStore.toggle(image)
+                        ProjectService.like(image, likeStore.isLiked(image))
                     }
                 }
             }
@@ -118,12 +61,12 @@ struct FemiImageCell: View {
             .onTapGesture {
                 guard selecting else { return }
                 guard eligible else { return }
-                guard viewModel.likeStore.isLiked(image) else { return }
+                guard likeStore.isLiked(image) else { return }
                 withAnimation(.spring(duration: 0.25)) {
-                    if let i = viewModel.selectedImageIds.firstIndex(of: image) {
-                        viewModel.selectedImageIds.remove(at: i)
-                    } else if viewModel.selectedImageIds.count < 3 {
-                        viewModel.selectedImageIds.append(image)
+                    if let i = selectedImageIds.firstIndex(of: image) {
+                        selectedImageIds.remove(at: i)
+                    } else if selectedImageIds.count < 3 {
+                        selectedImageIds.append(image)
                         UIImpactFeedbackGenerator(style: .light).impactOccurred()
                     }
                 }
@@ -142,14 +85,14 @@ struct FemiImageCell: View {
 // MARK: - Selection badge (image-only affordance)
 
 @ViewBuilder
-func femiSelectionBadge(order: Int?) -> some View {
+func selectionBadge(order: Int?) -> some View {
     ZStack {
         if let order {
             Text("\(order + 1)")
                 .font(.caption.bold())
                 .foregroundStyle(.white)
                 .frame(width: 26, height: 26)
-                .background(FemiTheme.accent, in: .circle)
+                .background(Theme.accent, in: .circle)
                 .overlay(Circle().stroke(.white, lineWidth: 1.5))
         } else {
             Circle()
