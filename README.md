@@ -1,68 +1,55 @@
 # Generate2
 
 ## Overview
-Generate2 is a SwiftUI-based iOS media generation library and companion application designed for creating lyric-synced music videos from AI-generated images. It provides a polished, dark-themed grid interface for generating, organizing, liking, and composing visual content synchronized to audio lyrics. The package is structured to be embedded in host applications, with a standalone demo host included for local testing.
+Generate2 is a SwiftUI-based iOS application and library for AI-powered music video generation. It provides a grid-based interface for managing generated images and videos, syncing media to extracted song lyrics, and composing timestamped music videos from user-selected assets. The app is designed as a reusable library (`Generate2`) with a standalone host target for development and testing.
 
-## Features
-- **Lyric-Synced Grid**: Automatically parses embedded SYLT lyrics from audio files and organizes generated images/videos into per-lyric-line sections.
-- **Multi-Model Image Generation**: Fan-out to three AI image models (Flux2Pro, NanoBanana2, ZImageTurbo) for default generation or per-line "fill" actions.
-- **Video Composition**: Select up to three liked images to generate a timestamped music video using a chat model for prompt engineering and a dedicated video generation API.
-- **Interactive Grid**: Filter by All/Liked/Videos, drag-and-drop images between lyric sections, and manage pending generation states with shimmer placeholders.
-- **Seamless Playback**: Auto-muted looping video cells in the grid, with a full-screen preview that temporarily overrides audio session categories for uninterrupted playback.
+## Key Features
+- **AI Image Generation**: One-tap generation using a 3-model fan-out (Flux2Pro, NanoBanana2, ZImageTurbo) for cinematic music video stills.
+- **Lyric-Synced Grid**: Automatically extracts SYLT lyrics from uploaded audio files and groups generated media by lyric line. Supports drag-and-drop assignment to specific timestamps.
+- **Video Composition**: Select up to 3 liked images, optionally extract a specific audio segment based on the primary image's lyric line, and generate a synchronized music video using LTX-2.3A2V.
+- **Media Management**: Like/save assets, filter by All/Liked/Videos, and full-screen playback with automatic audio session handling.
+- **Async-First UI**: Shimmer placeholders and background task groups keep the interface responsive during generation, uploads, and video rendering.
 
 ## Architecture & Key Files
-The project is structured as a Swift Package (`Generate2`) that can be embedded in host apps, with a standalone demo host for local testing.
+- `ContentView.swift` — Core screen orchestrator. Manages app state, theme, grid layout, video composition shelf, and API orchestration.
+- `Generate2App.swift` — App entry point. Handles credential injection via launch arguments and bridges the audio file picker sheet.
+- `ImageCell.swift` — Grid cell for images. Handles selection badges, liking, and drag-and-drop payload creation.
+- `VideoCell.swift` — Grid cell for videos. Implements auto-muted looping playback and full-screen preview triggering.
+- `PendingCell.swift` — Shimmer placeholders and error states for in-flight uploads, image generation, and video rendering.
+- `LyricExtractor.swift` — Parses SYLT metadata from audio files using the `AudioMarker` engine. Reconstructs lines from word-level timestamps.
+- `VideoPreview.swift` — Full-screen playback view. Manages `AVAudioSession` category switching for uninterrupted viewing.
+- `Package.swift` — Swift Package Manager manifest. Defines the `Generate2` library target, excludes app-specific files, and declares external dependencies.
 
-- `ContentView.swift`: The flagship screen. Orchestrates the entire UI state, grid rendering, toolbar, photo picker, and generation workflows. Contains theme definitions, local data models (`SongLine`, `GeneratedVideo`, `PendingVideo`, etc.), and the `LikeStore` observable.
-- `Generate2App.swift`: Standalone host application. Bridges launch arguments for credentials, manages the song picker sheet, and instantiates `ContentView`.
-- `ImageCell.swift` & `VideoCell.swift`: Grid components. Handle async image loading, selection badges, heart/like toggles, drag payloads, and video playback.
-- `LyricExtractor.swift`: Parses audio files using `AudioMarker` to extract word-level SYLT timestamps, grouping them into `SongLine` objects for UI synchronization.
-- `PendingCell.swift`: Shimmer placeholders and state management for in-flight image uploads, AI generations, and video compositions.
-- `VideoPreview.swift`: Full-screen video player. Manages `AVAudioSession` category switching (`.playback` → `.ambient`) to ensure videos play at volume when opened.
-- `Package.swift`: Swift Package manifest. Defines the `Generate2` library target, excludes app-specific files, and declares external dependencies.
+## Installation & Build
+Generate2 is distributed as a Swift Package. To build locally:
+1. Clone the repository.
+2. Open the project in Xcode or run `swift build` from the terminal.
+3. Ensure your environment supports iOS 26+ (as declared in `Package.swift`).
 
-## Installation & Setup
-Generate2 is distributed as a Swift Package. To integrate it into your own iOS project:
+## Configuration & Running
+The app requires API credentials passed at launch. Configure these in your Xcode scheme's **Run > Arguments** tab:
+- `-user <your_username>`
+- `-password <your_password>`
 
-1. Add the package to your Xcode project or `Package.swift`:
-   ```swift
-   .package(url: "https://github.com/femimarket/generate2", branch: "main")
-   ```
-2. Link the `Generate2` library to your target.
-3. Ensure your host app has the required capabilities and dependencies (see below).
+The `AppRoot` view in `Generate2App.swift` parses these arguments and injects them into the `ContentView` initializer. No hardcoded credentials or config files are used.
 
-**Standalone Testing**: Clone the repository and open the project in Xcode. The `Generate2App.swift` target serves as a ready-to-run demo. Launch arguments must be provided via the Xcode scheme:
-- `-user <your_api_username>`
-- `-password <your_api_password>`
+## Usage Workflow
+1. **Upload Audio**: Tap the song title in the toolbar to pick an `.mp3`, `.m4a`, or `.wav` file. SYLT lyrics are extracted automatically and displayed in the grid.
+2. **Generate Images**: Tap the `+` menu and select **Generate** to create three cinematic stills using the default prompt. Alternatively, long-press a lyric line header and select **Make pictures for this line** to generate assets tied to specific lyrics.
+3. **Organize & Like**: Heart images to save them. Drag and drop images onto lyric line headers to assign them to specific timestamps.
+4. **Compose Video**: Tap **Make Video** in the toolbar, select up to 3 liked images, and confirm. The app extracts the corresponding audio segment, generates a timestamped prompt via an LLM, and renders the final MP4.
+5. **Preview**: Tap any video cell to enter full-screen playback. The player temporarily overrides the silent switch for uninterrupted viewing.
 
-## Usage & Workflow
-1. **Load Audio**: Tap the song title in the toolbar to pick an audio file. The app extracts embedded SYLT lyrics and prepares the grid for lyric-synced organization.
-2. **Generate Images**: Tap the `+` menu → `Generate` to fan out three AI-generated images. Alternatively, long-press a lyric line header and select "Make pictures for this line" to generate images scoped to that specific lyric.
-3. **Organize & Like**: Heart images to save them. Drag and drop images into lyric line sections to sync them. Unassigned images appear at the top of the grid.
-4. **Compose Video**: Tap "Make Video" in the toolbar, select up to three hearted images, and confirm. The app:
-   - Extracts a 10-second audio segment matching the primary image's lyric line.
-   - Sends image prompts to a chat model (`qwen3_6_35b_a3b`) to generate a timestamped video prompt.
-   - Passes the primary image, audio segment, and prompt to the video generation API (`ltx2_3a2v`).
-   - Saves the resulting MP4 and syncs it to the corresponding lyric line.
-5. **Preview**: Tap any video cell to open a full-screen player. Tap the close button to return to the grid.
-
-## Configuration & Conventions
-- **Authentication**: Credentials are passed directly to `ContentView` via `user` and `password` parameters. Every `Api` call includes these for user/password auth.
-- **Local Storage**: All generated assets, prompts, models, and metadata are managed by `ProjectService`. Files are saved with `gen-<UUID>.<ext>` naming, and metadata is attached via `ProjectService.saveFile(..., prompt:, model:, subject:)`.
-- **State Management**: The UI relies on SwiftUI's `@State` and `@Observable` (Observation framework). `LikeStore` is a shared `@MainActor @Observable` class reused across all grid cells.
-- **Audio Session Handling**: `VideoPreview` temporarily switches `AVAudioSession` to `.playback` on appearance and reverts to `.ambient` on dismissal. This ensures videos play at volume when explicitly opened, while keeping the rest of the app silent-friendly.
-- **Lyric Syncing**: `LyricExtractor` splits word-level SYLT data into lines. When lyrics are loaded, unassigned images are automatically distributed across lyric lines in round-robin fashion.
-- **Pending State Scoping**: Generation and video pending cells track a `lineIndex` property. When lyrics are extracted, pending items without a line index are assigned to unassigned images, ensuring the grid remains coherent during background tasks.
+## Non-Obvious Conventions & Details
+- **Client-Side Lyric Windows**: Until server-side forced alignment is implemented, the client assigns equal 6-second windows to each extracted lyric line as a placeholder (`LyricExtractor.swift`).
+- **Metadata Storage**: Generated files are saved with `gen-<UUID>.<ext>` or `upload-<UUID>.jpg` naming conventions. Prompts, model names, and lyric subjects are persisted alongside the files via `ProjectService`.
+- **State Management**: The app avoids traditional ViewModels. All screen state lives in `@State` properties on the `Generate` view, with `LikeStore` (`@MainActor @Observable`) shared across cells.
+- **Audio Session Handling**: `VideoPreview` switches `AVAudioSession` to `.playback` on appear and reverts to `.ambient` on dismiss, ensuring the video plays even if the device is on silent.
+- **Grid Filtering**: The `GridFilter` enum (`all`, `liked`, `videos`) dynamically shows/hides content. Orphaned videos (unassigned to lyric lines) appear at the bottom of the grid.
+- **Drag & Drop**: Uses the `Transferable` protocol (`DraggedImage`) to move images between sections. Dropping an image on a lyric header updates both the UI index and the file's metadata subject.
+- **Video Generation Pipeline**: The composition flow extracts a precise audio segment matching the primary image's lyric line, uses `Qwen3` to generate a concise timestamped prompt from the selected image prompts, and finally calls `LTX-2.3A2V` to render the MP4.
 
 ## Dependencies
-Generate2 relies on three external Swift packages:
-- `swiftapi` (`Api`): Handles image, video, and chat model requests.
-- `swift-project-service` (`ProjectService`): Manages local file persistence, metadata attachment, and like tracking.
-- `swift-audio-marker` (`AudioMarker`): Parses audio files and extracts synchronized lyrics (SYLT).
-
-## Requirements
-- iOS 26.0+
-- Swift 6.2+
-- Xcode 16+ (for Swift concurrency and Observation framework)
-- Network access for AI API calls
-- Photos and Files app permissions for media import
+- `Api` (via `swiftapi` package, branch `main`) — Wraps AI model endpoints.
+- `ProjectService` (via `swift-project-service` package, branch `main`) — Local file I/O, metadata storage, and liking state.
+- `AudioMarker` (>= 0.1.1, via `swift-audio-marker` package) — SYLT lyric extraction engine.

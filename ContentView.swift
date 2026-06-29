@@ -632,7 +632,7 @@ private struct MakeVideoShelf: View {
                 let instruction = "Convert these \(imagePrompts.count) image prompts into a timestamped music-video prompt with exactly \(imagePrompts.count) multishot timestamps. Under 100 words. Return only the prompt itself — no title, no preamble, no commentary, no trailing notes, no markdown.\n\n\(imagePrompts.joined(separator: "\n---\n"))"
                 let chatReply = await Api.qwen3_6_35b_a3b(
                     user: user, password: password,
-                    messages: [(role: "user", content: instruction)]
+                    messages: [(role: .user, content: instruction)]
                 )
                 guard let prompt = chatReply.last?.content, !prompt.isEmpty else {
                     print("← chat FAIL: empty reply")
