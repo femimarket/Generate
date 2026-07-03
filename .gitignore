@@ -5,3 +5,10 @@ build/
 xcuserdata/
 *.xcuserdatad/
 .DS_Store
+
+# Kotlin Multiplatform (Kmp/)
+.gradle/
+.kotlin/
+.idea/
+local.properties
+*.iml

@@ -34,6 +34,9 @@ let package = Package(
                 "Package.swift",
                 "ContentViewOld.swift",
                 "v1.md",
+                // Kotlin Multiplatform implementations (Android + web) — not
+                // part of the Swift target.
+                "Kmp",
             ],
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),

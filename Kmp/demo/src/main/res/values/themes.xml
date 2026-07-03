@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <!-- Dark window so the Generate screen's forced-dark chrome matches from first frame. -->
+    <style name="Theme.GenerateDemo" parent="android:Theme.Material.NoActionBar" />
+</resources>
