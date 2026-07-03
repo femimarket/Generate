@@ -5,7 +5,7 @@
 //  Port of Generate2/PendingCell.swift.
 //
 
-package studio.femi.androidgenerate3
+package market.femi.generate
 
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode

@@ -7,7 +7,7 @@
 //  Android equivalent of switching AVAudioSession to .playback.
 //
 
-package studio.femi.androidgenerate3
+package market.femi.generate
 
 import android.net.Uri
 import androidx.activity.compose.BackHandler

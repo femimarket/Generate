@@ -10,7 +10,7 @@
 //  Android, so every call here hops to Dispatchers.IO first.
 //
 
-package studio.femi.androidgenerate3
+package market.femi.generate
 
 import android.content.ContentResolver
 import android.net.Uri

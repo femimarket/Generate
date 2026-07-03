@@ -5,6 +5,8 @@ plugins {
     alias(libs.plugins.kotlinMultiplatform)
     alias(libs.plugins.android.kotlin.multiplatform.library)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.composeMultiplatform)
+    alias(libs.plugins.kotlinSerialization)
     id("maven-publish")
 }
 
@@ -13,7 +15,7 @@ version = project.findProperty("libraryVersion") as String? ?: "local-dev"
 
 kotlin {
     androidLibrary {
-        namespace = "studio.femi.androidgenerate3"
+        namespace = "market.femi.generate"
         compileSdk = 37
         minSdk = 33
 
@@ -55,7 +57,18 @@ kotlin {
             implementation(libs.coil.compose)
             implementation(libs.kotlinx.serialization.json)
         }
-        webMain.dependencies {}
+        webMain.dependencies {
+            // Compose Multiplatform (canvas) implementation shared by js + wasmJs.
+            // Platform helpers (OPFS reads, mediabunny audio clip, <video>
+            // interop) come from the api itself since 4.10.x.
+            implementation(compose.runtime)
+            implementation(compose.foundation)
+            implementation(compose.ui)
+            implementation(compose.materialIconsExtended)
+            implementation(libs.cmp.material3)
+            implementation(libs.kotlinx.browser)
+            implementation(libs.kotlinx.serialization.json)
+        }
     }
 }
 

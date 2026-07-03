@@ -7,7 +7,7 @@
 //  consumer gets it automatically.
 //
 
-package studio.femi.androidgenerate3
+package market.femi.generate
 
 import android.content.Context
 import androidx.startup.Initializer

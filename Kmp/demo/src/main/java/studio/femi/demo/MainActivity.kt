@@ -55,7 +55,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import market.femi.api.ProjectService
-import studio.femi.androidgenerate3.ContentView
+import market.femi.generate.ContentView
 import kotlin.coroutines.resume
 
 class MainActivity : ComponentActivity() {

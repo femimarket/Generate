@@ -6,7 +6,7 @@
 //  Grid → derive → like → compose video → done.
 //
 
-package studio.femi.androidgenerate3
+package market.femi.generate
 
 import android.app.Activity
 import android.content.ClipDescription
@@ -324,7 +324,7 @@ class LikeStore {
 // MARK: - Drag payload
 
 /** Drag payload label for moving an image between lyric line sections. */
-internal const val DRAGGED_IMAGE_LABEL = "studio.femi.androidgenerate3.draggedImage"
+internal const val DRAGGED_IMAGE_LABEL = "market.femi.generate.draggedImage"
 
 // MARK: - Generate (the screen)
 

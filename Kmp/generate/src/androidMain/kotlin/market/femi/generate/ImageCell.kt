@@ -5,7 +5,7 @@
 //  Port of Generate2/ImageCell.swift.
 //
 
-package studio.femi.androidgenerate3
+package market.femi.generate
 
 import android.content.ClipData
 import androidx.compose.foundation.ExperimentalFoundationApi

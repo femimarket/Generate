@@ -5,7 +5,7 @@
 //  Port of Generate2/VideoCell.swift — auto-muted looping grid video cell.
 //
 
-package studio.femi.androidgenerate3
+package market.femi.generate
 
 import android.net.Uri
 import androidx.annotation.OptIn

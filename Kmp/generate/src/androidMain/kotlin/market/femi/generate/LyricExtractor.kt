@@ -7,7 +7,7 @@
 //  array of {index, text, startMs, durationMs}.
 //
 
-package studio.femi.androidgenerate3
+package market.femi.generate
 
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.int
