@@ -1,21 +1,19 @@
 package market.femi.screen
 
-// Brand-font slot for the Generate screen. The screen itself ships no font —
-// matching the iOS original (system fonts) and the Android target (Material
-// defaults). A host app supplies its brand family by wrapping the screen:
-//
-//     CompositionLocalProvider(LocalBrandFont provides myFamily) {
-//         GenerateImage(...)
-//     }
+// Brand font for the Generate screen. The screen inherits the host's font when
+// the host theme provides one (MaterialTheme typography / ProvideTextStyle);
+// otherwise it falls back to this local's brand default. The screen root's
+// `LocalBrandFont provides brandFamily()` anchors the detected family for
+// every Text inside.
 
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.text.font.FontFamily
 
-val LocalBrandFont = staticCompositionLocalOf<FontFamily> { FontFamily.SansSerif }
+internal val LocalBrandFont = staticCompositionLocalOf<FontFamily> { FontFamily.SansSerif }
 
-/** Kept so Generate.kt stays line-compatible with the webApp original: the
- *  screen's own `LocalBrandFont provides brandFamily()` becomes a passthrough
- *  of whatever the host provided. */
 @Composable
-internal fun brandFamily(): FontFamily = LocalBrandFont.current
+internal fun brandFamily(): FontFamily =
+    LocalTextStyle.current.fontFamily   // host theme set a font → inherit it
+        ?: LocalBrandFont.current       // host set none → lib brand default
