@@ -53,7 +53,6 @@ kotlin {
             implementation(libs.androidx.lifecycle.viewmodel.compose)
             implementation(libs.androidx.media3.exoplayer)
             implementation(libs.androidx.media3.ui)
-            implementation(libs.androidx.startup.runtime)
             implementation(libs.coil.compose)
             implementation(libs.kotlinx.serialization.json)
         }

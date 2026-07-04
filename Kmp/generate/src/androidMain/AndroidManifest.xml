@@ -1,21 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:tools="http://schemas.android.com/tools">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <!-- The generation Api talks to the network from native code. -->
     <uses-permission android:name="android.permission.INTERNET" />
 
-    <application>
-        <!-- Points Rust's ProjectService at filesDir before any UI runs. -->
-        <provider
-            android:name="androidx.startup.InitializationProvider"
-            android:authorities="${applicationId}.androidx-startup"
-            android:exported="false"
-            tools:node="merge">
-            <meta-data
-                android:name="market.femi.generate.ProjectServiceInitializer"
-                android:value="androidx.startup" />
-        </provider>
-    </application>
+    <!-- ProjectService's documents root is self-configured by the api's own
+         androidx.startup initializer (api ≥4.11.0); this library adds nothing. -->
 
 </manifest>
