@@ -1,175 +1,119 @@
 # Generate2
 
-**Generate2** is a cross-platform UI library for generating AI-powered music videos. It provides a unified interface for iOS (SwiftUI), Android (Jetpack Compose), and Web (Kotlin/JS) that allows users to generate images from text, organize them by song lyrics, and compose them into synchronized music videos.
+**Generate2** is a cross-platform UI library for generating AI-powered music videos. It provides a unified "Generate → Derive → Like → Compose" workflow that runs on iOS (SwiftUI), Android (Compose), and Web (Kotlin/JS).
 
-The library is designed to be embedded into host applications. It does not own navigation stacks or internal routing; instead, it exposes a single `ContentView` (iOS) or `GenerateImage` (Android/Web) composable that manages the entire "Grid → Derive → Like → Compose Video → Done" workflow.
+The app allows users to upload a song, automatically extract synchronized lyrics (SYLT), and generate cinematic images for each lyric line using multiple AI models. Users can curate these images, select up to three, and compose a final music video using a generative video model.
 
-## Features
+## Architecture & Targets
 
-*   **Cross-Platform UI**: Identical visual design and interaction patterns across iOS, Android, and Web.
-*   **AI Image Generation**: Fan-out generation using multiple models (Flux2Pro, NanoBanana2, ZImageTurbo) with shimmer placeholders for pending states.
-*   **Lyric-Synced Organization**: Automatically extracts SYLT lyrics from uploaded audio files and groups generated images into sections based on the song's timeline.
-*   **Drag-and-Drop Reassignment**: Move images between lyric sections (iOS/Android) or use a picker (Web) to reassign images to specific lines.
-*   **Video Composition**: Compose music videos by selecting up to 3 hearted images. The system uses an LLM to generate a timestamped prompt and an AI video model (LTX-2) to render the final clip.
-*   **Audio Trimming**: Automatically trims audio to the specific lyric line duration when composing videos.
-*   **Dark Theme**: Native dark navy aesthetic with magenta/blue accent gradients.
+The project is structured as a multi-platform library with platform-specific host applications.
 
-## Architecture
+### 1. iOS (SwiftUI)
+*   **Library:** `Generate2` (Swift Package).
+*   **Host:** `Generate2App.swift` (Standalone app).
+*   **Key Files:**
+    *   `ContentView.swift`: The flagship screen containing the grid, toolbar, and state management.
+    *   `PendingCell.swift`, `ImageCell.swift`, `VideoCell.swift`: UI components for the grid.
+    *   `LyricExtractor.swift`: Parses SYLT lyrics from audio files using `AudioMarker`.
+*   **Dependencies:** `Api`, `ProjectService`, `AudioMarker`.
 
-The project consists of three main implementation targets sharing the same logic:
+### 2. Android (Jetpack Compose)
+*   **Library:** `Kmp/generate` (Kotlin Multiplatform).
+*   **Host:** `Kmp/demo/src/main/java/studio/femi/demo/MainActivity.kt`.
+*   **Key Files:**
+    *   `ContentView.kt`: Compose equivalent of `ContentView.swift`.
+    *   `GenerateViewModel.kt`: Manages screen state, async generation tasks, and file I/O.
+    *   `AudioClipper.kt`: Android-native audio trimming using `MediaCodec` and `MediaMuxer` (equivalent to iOS `AVAssetExportSession`).
+    *   `LyricExtractor.kt`: Calls the shared Rust API for SYLT extraction.
+*   **Dependencies:** `market.femi.api`, `coil3`, `media3`.
 
-1.  **iOS (SwiftUI)**: `ContentView.swift`, `ImageCell.swift`, `VideoCell.swift`, etc.
-2.  **Android (Jetpack Compose)**: `ContentView.kt`, `GenerateViewModel.kt`, `ImageCell.kt`, etc.
-3.  **Web (Kotlin/JS)**: `Generate.kt`, `LyricExtractor.kt`, etc.
+### 3. Web (Kotlin/JS)
+*   **Library:** `Kmp/generate/src/webMain`.
+*   **Key Files:**
+    *   `Generate.kt`: The web implementation of the Generate screen.
+    *   `LyricExtractor.kt`: Web-specific SYLT parsing.
+*   **Storage:** Uses OPFS (Origin Private File System) via `ProjectService`.
 
-### Key Dependencies
+## Core Workflow
 
-*   **Api**: External package (`swiftapi` / `market.femi.api`) providing FFI bindings to Rust-based AI inference (Flux, LTX, Qwen).
-*   **ProjectService**: External package (`swift-project-service` / `market.femi.api.ProjectService`) handling local file storage (OPFS on Web, Documents directory on native).
-*   **AudioMarker**: iOS-specific package for SYLT extraction. Android/Web use a Rust-based `extractSylt` function via the Api package.
+1.  **Song Upload:** The user uploads an audio file (MP3/M4A/WAV). The app extracts embedded SYLT lyrics to create timed lyric lines.
+2.  **Image Generation:**
+    *   **Default:** Tapping "Generate" fans out requests to three models (`Flux2Pro`, `NanoBanana2`, `ZImageTurbo`) using a cinematic prompt.
+    *   **Per-Line:** Long-pressing a lyric line header or using the context menu generates images specifically for that lyric.
+3.  **Curation:** Users "like" (heart) images. Liked images are eligible for video composition.
+4.  **Video Composition:**
+    *   User selects up to 3 liked images.
+    *   The app uses an LLM (`qwen3_6_35b_a3b`) to create a timestamped prompt based on the image prompts.
+    *   It clips the audio to the relevant lyric segment.
+    *   It sends the image, audio, and prompt to the video model (`ltx2_3a2v`).
+5.  **Playback:** Generated videos loop muted in the grid. Tapping a video plays it unmuted with audio focus.
 
-## Installation & Integration
+## Installation & Setup
 
-### iOS
+### Prerequisites
+*   **iOS:** Xcode 15+, Swift 6.
+*   **Android:** Android Studio, JDK 17+.
+*   **Web:** Node.js environment for running the Kotlin/JS build.
 
-Add the library via Swift Package Manager.
+### Credentials
+The app requires API credentials for all generation tasks. These are passed at runtime:
 
-```swift
-// Package.swift
-dependencies: [
-    .package(url: "https://github.com/femimarket/generate2", branch: "main"),
-]
-```
+*   **iOS:** Passed via `ContentView` init. In the demo app, read from launch arguments: `-user <value> -password <value>`.
+*   **Android:** Passed via `ContentView` composable. In the demo app, read from intent extras: `adb shell am start -n studio.femi.demo/.MainActivity -e user <u> -e password <p>`.
+*   **Web:** Passed to `GenerateImage(user, password)`.
 
-In your app's entry point, wrap the `ContentView` in a `NavigationStack` (if needed) and provide credentials via launch arguments or configuration.
+### Building
 
-```swift
-import SwiftUI
-import Generate2
+#### iOS
+1.  Open the Xcode project or use Swift Package Manager.
+2.  Ensure dependencies (`swiftapi`, `swift-project-service`, `swift-audio-marker`) are resolved.
+3.  Build and run `Generate2App`.
 
-@main
-struct MyApp: App {
-    var body: some Scene {
-        WindowGroup {
-            ContentView(
-                user: "your-api-user",
-                password: "your-api-password",
-                onUploadSong: { await uploadSong() },
-                menuItemName1: "Editorial",
-                menuItemIcon1: "rectangle.stack",
-                onMenuItemTapped1: { /* Handle custom menu item */ }
-            )
-        }
-    }
-}
-```
+#### Android
+1.  Open the project in Android Studio.
+2.  Sync Gradle files.
+3.  Run the `demo` module.
+4.  Configure the Run Configuration to pass launch arguments:
+    *   Go to **Run > Edit Configurations**.
+    *   Under **Launch Options**, add `user` and `password` extras.
 
-### Android
+#### Web
+1.  Navigate to `Kmp/generate`.
+2.  Run the web build task (e.g., `./gradlew :Kmp:generate:jsBrowserDevelopmentRun`).
 
-Add the library to your `build.gradle.kts`.
+## Key Files & Responsibilities
 
-```kotlin
-dependencies {
-    implementation("market.femi:generate:latest.release")
-}
-```
-
-In your `MainActivity`, initialize the view:
-
-```kotlin
-class MainActivity : ComponentActivity() {
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        setContent {
-            GenerateTheme {
-                ContentView(
-                    user = "your-api-user",
-                    password = "your-api-password",
-                    onUploadSong = { /* Handle song upload */ },
-                    menuItemName1 = "Editorial",
-                    menuItemIcon1 = Icons.Filled.Collections,
-                    onMenuItemTapped1 = { /* Handle custom menu item */ }
-                )
-            }
-        }
-    }
-}
-```
-
-### Web
-
-Include the Kotlin/JS artifact in your web build. The entry point is `GenerateImage`.
-
-```kotlin
-@Composable
-fun App() {
-    GenerateImage(
-        user = "your-api-user",
-        password = "your-api-password",
-        onEngineer = { /* Handle engineer menu item */ }
-    )
-}
-```
-
-## Usage Guide
-
-### 1. Initial Setup
-Upon first launch, the grid is empty. The user must:
-1.  **Upload a Song**: Tap the song title in the toolbar to select an audio file (MP3/M4A/WAV). The app extracts SYLT lyrics if present.
-2.  **Generate Images**: Tap the `+` button and select "Generate". This triggers a 3-model fan-out to create initial images.
-
-### 2. Organizing Content
-*   **Lyric Sections**: If a song with lyrics is loaded, the grid displays sections for each lyric line.
-*   **Unassigned Images**: Images not yet assigned to a line appear at the top of the "All" view.
-*   **Reassigning**:
-    *   **iOS/Android**: Drag an image onto a lyric header to move it.
-    *   **Web**: Long-press an image to open a "Move to line" sheet.
-*   **Generating per Line**: Long-press a lyric header to trigger generation specifically for that line's text.
-
-### 3. Liking and Selecting
-*   **Hearting**: Tap the heart icon on any image or video to save it.
-*   **Making a Video**:
-    1.  Tap "Make Video" in the toolbar.
-    2.  Select up to 3 hearted images.
-    3.  Tap "Make video" in the bottom shelf.
-    4.  The system composes a prompt using the selected images' prompts and an LLM, then generates a video using the primary image and the corresponding audio segment.
-
-### 4. Viewing Videos
-*   **Grid**: Videos loop muted in the grid.
-*   **Preview**: Tap a video to enter full-screen playback with audio.
-
-## Key Files Reference
-
-### iOS
-*   `ContentView.swift`: Main entry point, state management, and view composition.
-*   `ImageCell.swift`: Individual image grid cell with like/drag logic.
-*   `VideoCell.swift`: Video grid cell using `AVPlayer`.
-*   `PendingCell.swift`: Shimmer placeholders for in-flight tasks.
-*   `LyricExtractor.swift`: SYLT parsing logic.
-
-### Android
-*   `ContentView.kt`: Jetpack Compose entry point.
-*   `GenerateViewModel.kt`: Holds all screen state, handles async generation, and manages `ProjectService` calls.
-*   `AudioClipper.kt`: Native Android audio trimming using `MediaCodec` and `MediaMuxer`.
-*   `LyricExtractor.kt`: SYLT parsing via Rust FFI.
-
-### Web
-*   `Generate.kt`: Kotlin/JS implementation of the UI.
-*   `LyricExtractor.kt`: SYLT parsing via Rust FFI.
+| File | Platform | Responsibility |
+| :--- | :--- | :--- |
+| `ContentView.swift` / `ContentView.kt` | iOS / Android | Main screen logic, grid rendering, toolbar, state management. |
+| `GenerateViewModel.kt` | Android | ViewModel for Android state, coroutine management, file I/O. |
+| `Generate.kt` | Web | Web-specific screen logic, OPFS integration. |
+| `PendingCell.swift` / `PendingCell.kt` | iOS / Android | Shimmer placeholders for in-progress generations/uploads. |
+| `ImageCell.swift` / `ImageCell.kt` | iOS / Android | Grid image display, like/selection logic, drag source. |
+| `VideoCell.swift` / `VideoCell.kt` | iOS / Android | Grid video playback (looping/muted), full-screen preview trigger. |
+| `VideoPreview.swift` / `VideoPreview.kt` | iOS / Android | Full-screen video player with audio focus management. |
+| `LyricExtractor.swift` / `LyricExtractor.kt` | iOS / Android | Parses SYLT lyrics from audio files. |
+| `AudioClipper.kt` | Android | Native audio trimming for video composition. |
+| `Package.swift` | iOS | SPM manifest defining targets and dependencies. |
 
 ## Non-Obvious Conventions
 
-*   **State Persistence**: All generated images and videos are saved to the `ProjectService` directory. The app scans this directory on load to rehydrate the grid.
-*   **Audio Session Management**:
-    *   **iOS**: Switches `AVAudioSession` to `.playback` during video preview, reverts to `.ambient` on dismiss.
-    *   **Android**: Uses `AudioAttributes` with `USAGE_MEDIA` and `CONTENT_TYPE_MOVIE` to request audio focus during preview.
-    *   **Web**: Uses native HTML5 video controls; audio focus is handled by the browser.
-*   **Image Format Sniffing**: The `saveResponseData` helper sniffs image extensions from magic bytes (PNG, JPG, WebP, GIF, HEIC) to ensure correct file handling.
-*   **Pending States**: All in-flight tasks (image gen, video gen, uploads) use a `Pending` struct with `Working`/`Failed` states. Failed cells are tappable to dismiss them from the grid.
-*   **Selection Mode**: When "Make Video" is active, the toolbar hides, and a bottom shelf appears. The grid highlights selected images with a numbered badge.
-
-## Troubleshooting
-
-*   **Empty Grid**: Ensure `ProjectService` is correctly initialized and the app has storage permissions.
-*   **No Lyrics**: If the grid doesn't show lyric sections, the uploaded audio file may not contain embedded SYLT metadata.
-*   **Video Generation Fails**: Check that the primary image has an associated prompt. The video generation step relies on the LLM to combine image prompts into a video prompt.
+*   **State Management:**
+    *   **iOS:** Uses SwiftUI `@State` and `@Observable` classes (`LikeStore`) directly in views.
+    *   **Android:** Uses a `ViewModel` (`GenerateViewModel`) to survive configuration changes. State is exposed via `mutableStateOf`/`mutableStateListOf`.
+    *   **Web:** Uses `remember` and `mutableStateOf` directly in the composable.
+*   **File Storage:**
+    *   **iOS:** Uses `ProjectService` to save files to the app's documents directory.
+    *   **Android:** Uses `ProjectService` (JNI passthrough to Rust) to save files.
+    *   **Web:** Uses OPFS via `ProjectService`.
+*   **Audio Trimming:**
+    *   **iOS:** Uses `AVAssetExportSession` to trim audio to the specific lyric segment.
+    *   **Android:** Uses `AudioClipper.kt` which decodes PCM and re-encodes to AAC-LC in an M4A container using `MediaCodec`.
+*   **Drag & Drop:**
+    *   **iOS:** Uses SwiftUI `draggable`/`dropDestination` to move images between lyric sections.
+    *   **Android:** Uses Compose `dragAndDropSource`/`dragAndDropTarget` with a custom MIME type label (`DRAGGED_IMAGE_LABEL`).
+    *   **Web:** Uses a "Move to Line" sheet picker as a fallback for drag-and-drop.
+*   **Like Store:**
+    *   A shared `LikeStore` (or equivalent state) is passed to all image/video cells to manage the "liked" state locally before syncing to disk.
+*   **Theme:**
+    *   The app uses a custom dark theme with magenta/blue accents. The colors are defined in `Theme` objects in each platform's code.

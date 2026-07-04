@@ -78,7 +78,7 @@ publishing {
     repositories {
         maven {
             name = "GitHubPackages"
-            url = uri("https://maven.pkg.github.com/femimarket/SwiftGenerate2")
+            url = uri("https://maven.pkg.github.com/femimarket/Generate")
             credentials {
                 username = providers.gradleProperty("gpr.user").orNull
                     ?: System.getenv("GITHUB_ACTOR")
