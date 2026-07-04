@@ -1,4 +1,4 @@
-package market.femi.screen
+package market.femi.generate.screen
 
 // Port of Generate2/LyricExtractor.swift. The word→line SYLT assembly already
 // lives in the api's Rust `extractSylt` (itself a port of the Swift file), so

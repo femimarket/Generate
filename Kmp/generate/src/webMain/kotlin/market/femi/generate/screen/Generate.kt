@@ -4,7 +4,7 @@
     ExperimentalFoundationApi::class,
 )
 
-package market.femi.screen
+package market.femi.generate.screen
 
 // Generate screen — the flagship grid: make pictures → heart → compose video.
 // Verbatim port of Generate2/ContentView.swift plus its cell files (ImageCell,
